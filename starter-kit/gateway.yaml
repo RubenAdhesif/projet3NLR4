@@ -1,0 +1,594 @@
+openapi: "3.1.0"
+
+info:
+  title: Smart Lab — WoT Gateway API
+  version: "1.0.0"
+  license:
+    name: MIT
+    url: https://opensource.org/licenses/MIT
+  description: |
+    REST API of the Web of Things Gateway for the Smart Lab project.
+
+    The gateway acts as:
+    - a **registry** of Things (`POST /things`, `GET /things`, `DELETE /things/{id}`)
+    - a **reverse proxy** to each Thing's REST API (`/things/{id}/properties/**`, `/things/{id}/actions/**`)
+    - an **event bus**: Things post events (`POST /events`), browsers subscribe via SSE (`GET /events/stream`)
+    - an **automation engine** applying rules R1 (lighting) and R2 (thermal comfort)
+
+    All endpoints except `GET /` and `GET /events/stream?token=…` require the `Authorization: Bearer <token>` header.
+    SSE clients pass the token as a query parameter because browsers cannot set custom headers on EventSource.
+
+servers:
+  - url: http://localhost:8080
+    description: Local development gateway
+
+security:
+  - bearerAuth: []
+
+# ── Paths ──────────────────────────────────────────────────────────────────────
+
+paths:
+
+  # ── Dashboard ────────────────────────────────────────────────────────────────
+
+  /:
+    get:
+      operationId: getDashboard
+      summary: Serve the web dashboard (public)
+      security: []
+      tags: [Dashboard]
+      responses:
+        "200":
+          description: HTML dashboard page
+          content:
+            text/html:
+              schema:
+                type: string
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  # ── Registry ─────────────────────────────────────────────────────────────────
+
+  /things:
+    get:
+      operationId: listThings
+      summary: List all registered Things
+      tags: [Registry]
+      responses:
+        "200":
+          description: Array of Things (summary view)
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/ThingSummary"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+    post:
+      operationId: registerThing
+      summary: Register a new Thing
+      description: |
+        Called by each Thing at startup. Returns 201 with a Location header on success.
+        Returns 409 if a Thing with the same id is already registered.
+      tags: [Registry]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ThingRegistration"
+            examples:
+              lamp:
+                summary: Register the lamp
+                value:
+                  id: lamp
+                  name: Lamp
+                  baseUrl: "http://localhost:8082"
+                  model: {}
+      responses:
+        "201":
+          description: Thing registered
+          headers:
+            Location:
+              description: "e.g. /things/lamp"
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Thing"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "409":
+          $ref: "#/components/responses/Conflict"
+
+  /things/{id}:
+    parameters:
+      - $ref: "#/components/parameters/ThingId"
+
+    get:
+      operationId: getThing
+      summary: Get a registered Thing
+      tags: [Registry]
+      responses:
+        "200":
+          description: Thing detail (with model)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Thing"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+    delete:
+      operationId: unregisterThing
+      summary: Unregister a Thing
+      tags: [Registry]
+      responses:
+        "204":
+          description: Thing unregistered
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  # ── Proxy — Properties ────────────────────────────────────────────────────────
+
+  /things/{id}/properties:
+    parameters:
+      - $ref: "#/components/parameters/ThingId"
+
+    get:
+      operationId: getProperties
+      summary: Get all properties of a Thing (proxied)
+      description: Forwards `GET {baseUrl}/properties` to the Thing. Returns 502 if unreachable.
+      tags: [Proxy]
+      responses:
+        "200":
+          description: All current property values
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+              examples:
+                lamp:
+                  value: { on: false, brightness: 80 }
+                thermostat:
+                  value: { temperature: 17.5, target: 19.0, mode: "off" }
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "502":
+          $ref: "#/components/responses/BadGateway"
+
+  /things/{id}/properties/{name}:
+    parameters:
+      - $ref: "#/components/parameters/ThingId"
+      - $ref: "#/components/parameters/PropertyName"
+
+    get:
+      operationId: getProperty
+      summary: Get a single property of a Thing (proxied)
+      tags: [Proxy]
+      responses:
+        "200":
+          description: Property value
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PropertyValue"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "502":
+          $ref: "#/components/responses/BadGateway"
+
+    put:
+      operationId: setProperty
+      summary: Set a property on a Thing (proxied)
+      description: |
+        Forwards `PUT {baseUrl}/properties/{name}` to the Thing.
+        The Thing validates the value and may return 400 if it is out of range or wrong type.
+        Read-only properties (e.g. `temperature` on the thermostat) always return 400.
+      tags: [Proxy]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PropertyWrite"
+            examples:
+              turnOn:
+                summary: Turn the lamp on
+                value: { value: true }
+              setBrightness:
+                summary: Set lamp brightness to 60%
+                value: { value: 60 }
+              setMode:
+                summary: Switch thermostat to heat mode
+                value: { value: "heat" }
+      responses:
+        "200":
+          description: Property updated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PropertyValue"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "502":
+          $ref: "#/components/responses/BadGateway"
+
+  # ── Proxy — Actions ───────────────────────────────────────────────────────────
+
+  /things/{id}/actions/{name}:
+    parameters:
+      - $ref: "#/components/parameters/ThingId"
+      - $ref: "#/components/parameters/ActionName"
+
+    post:
+      operationId: invokeAction
+      summary: Invoke an action on a Thing (proxied)
+      description: |
+        Forwards `POST {baseUrl}/actions/{name}` to the Thing.
+        Returns 404 if the action does not exist on the Thing.
+      tags: [Proxy]
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: true
+            examples:
+              toggle:
+                summary: Toggle the lamp
+                value: {}
+              setBrightness:
+                summary: Set brightness to 80%
+                value: { value: 80 }
+              setTarget:
+                summary: Set thermostat target to 20°C
+                value: { value: 20 }
+              simulateMotion:
+                summary: Simulate a motion detection
+                value: {}
+      responses:
+        "200":
+          description: Action completed
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "502":
+          $ref: "#/components/responses/BadGateway"
+
+  # ── Events ────────────────────────────────────────────────────────────────────
+
+  /events:
+    post:
+      operationId: postEvent
+      summary: Receive an event from a Thing
+      description: |
+        Called by registered Things when something notable happens (e.g. motion detected,
+        property changed, target reached). The gateway broadcasts the event to all SSE clients
+        and evaluates the automation rules R1 and R2.
+      tags: [Events]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ThingEvent"
+            examples:
+              motion:
+                summary: Motion detected
+                value:
+                  thingId: motion
+                  type: motion
+                  data: { timestamp: "2026-10-02T12:00:00Z" }
+                  timestamp: "2026-10-02T12:00:00Z"
+              targetReached:
+                summary: Thermostat reached its target temperature
+                value:
+                  thingId: thermostat
+                  type: targetReached
+                  data: { temperature: 19.0, target: 19.0 }
+                  timestamp: "2026-10-02T12:05:00Z"
+      responses:
+        "202":
+          description: Event accepted and broadcast to SSE clients
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          description: The Thing identified by `thingId` is not registered
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /events/stream:
+    get:
+      operationId: streamEvents
+      summary: Subscribe to the live SSE event stream
+      description: |
+        Server-Sent Events (SSE) endpoint for the dashboard browser.
+
+        Because browsers cannot set custom headers for `EventSource`, the token
+        is passed as a **query parameter** instead of the `Authorization` header.
+        The gateway authenticates the request by checking `?token=<bearer-token>`.
+
+        Events emitted on this stream:
+        | Name | When |
+        |---|---|
+        | `hello` | Immediately on connection |
+        | `thing` | A Thing posted an event via `POST /events` |
+        | `registry` | A Thing was registered or unregistered |
+      security: []
+      tags: [Events]
+      parameters:
+        - name: token
+          in: query
+          required: true
+          schema:
+            type: string
+          example: operator-secret
+      responses:
+        "200":
+          description: SSE stream (keep-alive every 15s)
+          content:
+            text/event-stream:
+              schema:
+                type: string
+        "401":
+          description: Missing or invalid token
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+# ── Components ─────────────────────────────────────────────────────────────────
+
+components:
+
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: opaque
+      description: |
+        Bearer token configured in gateway application.yml:
+        - `operator-secret`: Full access (read, write properties, invoke actions, register/unregister things).
+        - `viewer-secret`: Read-only access (GET allowed, PUT/POST/DELETE return 403 Forbidden).
+
+  parameters:
+    ThingId:
+      name: id
+      in: path
+      required: true
+      description: Unique identifier of the Thing (e.g. lamp, thermostat, motion)
+      schema:
+        type: string
+      example: lamp
+
+    PropertyName:
+      name: name
+      in: path
+      required: true
+      description: Property name (e.g. on, brightness, temperature, mode)
+      schema:
+        type: string
+      example: brightness
+
+    ActionName:
+      name: name
+      in: path
+      required: true
+      description: Action name (e.g. toggle, setBrightness, setTarget, simulateMotion)
+      schema:
+        type: string
+      example: setBrightness
+
+  schemas:
+
+    ThingSummary:
+      type: object
+      description: Lightweight representation returned by GET /things
+      required: [id, name, links]
+      properties:
+        id:
+          type: string
+          example: lamp
+        name:
+          type: string
+          example: Lamp
+        links:
+          type: object
+          properties:
+            self:
+              type: string
+              example: /things/lamp
+
+    Thing:
+      type: object
+      description: Full Thing registration record
+      required: [id, name, baseUrl]
+      properties:
+        id:
+          type: string
+          example: lamp
+        name:
+          type: string
+          example: Lamp
+        baseUrl:
+          type: string
+          format: uri
+          example: "http://localhost:8082"
+        model:
+          type: object
+          description: Web Thing model (Thing Description)
+          additionalProperties: true
+
+    ThingRegistration:
+      type: object
+      required: [id, baseUrl]
+      properties:
+        id:
+          type: string
+          example: lamp
+        name:
+          type: string
+          example: Lamp
+        baseUrl:
+          type: string
+          format: uri
+          example: "http://localhost:8082"
+        model:
+          type: object
+          additionalProperties: true
+
+    PropertyValue:
+      type: object
+      description: Single property read/write response
+      required: [name, value]
+      properties:
+        name:
+          type: string
+          example: brightness
+        value:
+          description: Current or newly set value (any JSON type)
+          example: 60
+
+    PropertyWrite:
+      type: object
+      description: Request body for PUT /things/{id}/properties/{name}
+      required: [value]
+      properties:
+        value:
+          description: New value (type validated by the Thing)
+
+    ThingEvent:
+      type: object
+      description: Event posted by a Thing
+      required: [thingId, type]
+      properties:
+        thingId:
+          type: string
+          example: motion
+        type:
+          type: string
+          example: motion
+          description: Event type (e.g. motion, targetReached, propertyChanged)
+        data:
+          type: object
+          additionalProperties: true
+          example: { timestamp: "2026-10-02T12:00:00Z" }
+        timestamp:
+          type: string
+          format: date-time
+          example: "2026-10-02T12:00:00.000Z"
+
+    ErrorResponse:
+      type: object
+      description: Standard error body returned by the gateway
+      required: [status, error]
+      properties:
+        status:
+          type: integer
+          example: 404
+        error:
+          type: string
+          example: "thing lamp is not registered"
+
+  responses:
+    BadRequest:
+      description: Bad request — missing or invalid field
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+          example:
+            status: 400
+            error: "fields id and baseUrl are required"
+
+    Unauthorized:
+      description: Missing or invalid Authorization token
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+          example:
+            status: 401
+            error: "Unauthorized"
+
+    Forbidden:
+      description: Forbidden — operation not permitted with the provided token (e.g. read-only viewer role)
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+          example:
+            status: 403
+            error: "forbidden: read-only access"
+
+    NotFound:
+      description: Resource not found
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+          example:
+            status: 404
+            error: "thing thermostat is not registered"
+
+    Conflict:
+      description: Thing already registered with this id
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+          example:
+            status: 409
+            error: "thing lamp is already registered"
+
+    BadGateway:
+      description: The Thing is registered but not reachable (connection refused or timeout)
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+          example:
+            status: 502
+            error: "thing lamp is not reachable"

@@ -190,7 +190,7 @@ Ces conventions sont obligatoires et vérifiées automatiquement par le script d
 ---
 
 ### Phase 8 : Spécification OpenAPI (`gateway.yaml`)
-- [ ] **Contrat OpenAPI v3** :
+- [x] **Contrat OpenAPI v3** :
   - Rédiger `gateway.yaml` décrivant l'ensemble de l'API de la passerelle.
   - Inclure les endpoints `/things`, `/things/{id}`, `/things/{id}/properties/**`, `/things/{id}/actions/**`, `/events`, `/events/stream`.
   - Spécifier le schéma de sécurité `bearerAuth`.

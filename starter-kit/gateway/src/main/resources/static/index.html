@@ -119,6 +119,9 @@
       cursor: pointer;
       transition: background .15s, border-color .15s;
       white-space: nowrap;
+      text-decoration: none;
+      display: inline-flex;
+      align-items: center;
     }
     .btn:hover { background: var(--border); }
     .btn.primary { background: var(--accent-dim); border-color: var(--accent); color: var(--text); }
@@ -377,6 +380,7 @@
     </div>
     <button class="btn primary" onclick="connect()">Connect</button>
     <button class="btn" onclick="refreshAll()">Refresh</button>
+    <a class="btn" href="/gateway.yaml" target="_blank" title="View OpenAPI Specification">API Spec</a>
   </div>
 </header>
 

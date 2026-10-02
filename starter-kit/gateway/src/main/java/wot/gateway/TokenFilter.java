@@ -14,16 +14,21 @@ import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 
 /**
- * Bearer token on /things/** and /events/** (token: gateway.token). Dashboard files are public.
- * TODO (bonus): roles viewer / operator, 403.
+ * Bearer token on /things/** and /events/**.
+ * - operator (gateway.token, default operator-secret): full access
+ * - viewer (gateway.viewer-token, default viewer-secret): read-only (GET allowed, PUT/POST/DELETE return 403)
+ * Dashboard and static files are public.
  */
 @Component
 public class TokenFilter extends OncePerRequestFilter {
 
-    private final String expectedToken;
+    private final String operatorToken;
+    private final String viewerToken;
 
-    public TokenFilter(@Value("${gateway.token}") String expectedToken) {
-        this.expectedToken = expectedToken;
+    public TokenFilter(@Value("${gateway.token}") String operatorToken,
+                       @Value("${gateway.viewer-token:viewer-secret}") String viewerToken) {
+        this.operatorToken = operatorToken;
+        this.viewerToken = viewerToken;
     }
 
     @Override
@@ -44,13 +49,21 @@ public class TokenFilter extends OncePerRequestFilter {
             token = request.getParameter("token");
         }
 
-        if (token == null || !token.equals(expectedToken)) {
+        if (token == null || (!token.equals(operatorToken) && !token.equals(viewerToken))) {
             response.setStatus(HttpServletResponse.SC_UNAUTHORIZED);
             response.setHeader(HttpHeaders.WWW_AUTHENTICATE, "Bearer");
             response.setContentType(MediaType.APPLICATION_JSON_VALUE);
             response.getWriter().write("{\"status\":401,\"error\":\"missing or invalid token\"}");
             return;
         }
+
+        if (token.equals(viewerToken) && !request.getMethod().equalsIgnoreCase("GET")) {
+            response.setStatus(HttpServletResponse.SC_FORBIDDEN);
+            response.setContentType(MediaType.APPLICATION_JSON_VALUE);
+            response.getWriter().write("{\"status\":403,\"error\":\"forbidden: read-only access\"}");
+            return;
+        }
+
         chain.doFilter(request, response);
     }
 }
