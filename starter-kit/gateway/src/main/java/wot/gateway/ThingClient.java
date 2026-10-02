@@ -36,13 +36,14 @@ public class ThingClient {
     /** GET {baseUrl}{path} */
     public ResponseEntity<Object> get(String baseUrl, String path, String thingId) {
         try {
-            return client(baseUrl).get()
+            var entity = client(baseUrl).get()
                     .uri(path)
                     .retrieve()
                     // Propagate 4xx/5xx from the thing instead of throwing
                     .onStatus(HttpStatusCode::isError, (req, resp) -> {
                     })
                     .toEntity(Object.class);
+            return ResponseEntity.status(entity.getStatusCode()).body(entity.getBody());
         } catch (ResourceAccessException e) {
             log.warn("thing {} unreachable on GET {}{}: {}", thingId, baseUrl, path, e.getMessage());
             throw new ApiException(org.springframework.http.HttpStatus.BAD_GATEWAY,
@@ -53,7 +54,7 @@ public class ThingClient {
     /** PUT {baseUrl}{path} with body */
     public ResponseEntity<Object> put(String baseUrl, String path, Map<String, Object> body, String thingId) {
         try {
-            return client(baseUrl).put()
+            var entity = client(baseUrl).put()
                     .uri(path)
                     .contentType(MediaType.APPLICATION_JSON)
                     .body(body)
@@ -61,6 +62,7 @@ public class ThingClient {
                     .onStatus(HttpStatusCode::isError, (req, resp) -> {
                     })
                     .toEntity(Object.class);
+            return ResponseEntity.status(entity.getStatusCode()).body(entity.getBody());
         } catch (ResourceAccessException e) {
             log.warn("thing {} unreachable on PUT {}{}: {}", thingId, baseUrl, path, e.getMessage());
             throw new ApiException(org.springframework.http.HttpStatus.BAD_GATEWAY,
@@ -75,10 +77,11 @@ public class ThingClient {
             if (body != null && !body.isEmpty()) {
                 spec = spec.contentType(MediaType.APPLICATION_JSON).body(body);
             }
-            return spec.retrieve()
+            var entity = spec.retrieve()
                     .onStatus(HttpStatusCode::isError, (req, resp) -> {
                     })
                     .toEntity(Object.class);
+            return ResponseEntity.status(entity.getStatusCode()).body(entity.getBody());
         } catch (ResourceAccessException e) {
             log.warn("thing {} unreachable on POST {}{}: {}", thingId, baseUrl, path, e.getMessage());
             throw new ApiException(org.springframework.http.HttpStatus.BAD_GATEWAY,
