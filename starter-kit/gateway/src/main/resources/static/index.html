@@ -215,21 +215,106 @@
     input:checked + .slider { background: var(--amber); }
     input:checked + .slider::before { transform: translateX(16px); }
 
+    /* ── Lamp Stage & Interactive Glow ───────────────────────────────────────── */
+    .lamp-stage {
+      position: relative;
+      background: radial-gradient(circle at center, #1b212c 0%, #0f1319 100%);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 1.25rem 1rem;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      min-height: 145px;
+      cursor: pointer;
+      user-select: none;
+      overflow: hidden;
+      transition: border-color .3s, box-shadow .3s;
+    }
+    .lamp-stage:hover {
+      border-color: var(--amber);
+    }
+    .lamp-glow-aura {
+      position: absolute;
+      width: 140px;
+      height: 140px;
+      border-radius: 50%;
+      background: radial-gradient(circle, rgba(255, 193, 7, 0.85) 0%, rgba(255, 152, 0, 0.4) 45%, transparent 70%);
+      pointer-events: none;
+      opacity: 0;
+      filter: blur(14px);
+      transition: opacity .15s ease, transform .15s ease;
+      transform: scale(0.6);
+    }
+    .lamp-bulb-visual {
+      position: relative;
+      z-index: 2;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      color: var(--text-muted);
+      transition: color .2s ease, filter .2s ease, transform .2s ease;
+    }
+    .lamp-bulb-visual svg {
+      transition: transform .15s ease;
+    }
+    .lamp-stage:active .lamp-bulb-visual svg {
+      transform: scale(0.92);
+    }
+    .lamp-stage-hint {
+      position: relative;
+      z-index: 2;
+      margin-top: .7rem;
+      font-size: .75rem;
+      font-family: var(--mono);
+      font-weight: 500;
+      color: var(--text-dim);
+      transition: color .2s ease;
+      text-align: center;
+    }
+    .preset-row {
+      display: flex;
+      gap: .35rem;
+      margin-top: .4rem;
+    }
+    .btn-preset {
+      flex: 1;
+      padding: .25rem 0;
+      font-size: .7rem;
+      font-family: var(--mono);
+      text-align: center;
+      justify-content: center;
+      border-radius: 5px;
+    }
+    .btn-preset.active {
+      background: var(--amber-dim);
+      border-color: var(--amber);
+      color: var(--amber);
+    }
+
     /* ── Brightness slider ──────────────────────────────────────────────────── */
     .range-wrap { display: flex; flex-direction: column; gap: .4rem; }
     .range-row  { display: flex; align-items: center; gap: .6rem; }
     input[type="range"] {
-      flex: 1; height: 4px; cursor: pointer;
+      flex: 1; height: 6px; cursor: pointer;
       -webkit-appearance: none; appearance: none;
-      border-radius: 4px;
+      border-radius: 6px;
       background: var(--border);
       outline: none;
+      transition: background .1s;
     }
     input[type="range"]::-webkit-slider-thumb {
       -webkit-appearance: none;
-      width: 14px; height: 14px; border-radius: 50%;
-      background: var(--accent);
+      width: 16px; height: 16px; border-radius: 50%;
+      background: var(--amber);
+      box-shadow: 0 0 8px rgba(210, 153, 34, .6);
       cursor: pointer;
+      transition: transform .15s, box-shadow .15s;
+    }
+    input[type="range"]:active::-webkit-slider-thumb {
+      transform: scale(1.25);
+      box-shadow: 0 0 14px rgba(255, 193, 7, .9);
     }
     .range-val { font-family: var(--mono); font-size: .78rem; width: 2.4rem; text-align: right; }
 
@@ -390,7 +475,7 @@
   <!-- Lamp card -->
   <div class="card" id="card-lamp">
     <div class="card-header">
-      <div class="card-icon lamp">💡</div>
+      <div class="card-icon lamp" id="lamp-icon">💡</div>
       <div class="card-meta">
         <div class="card-name">Lamp</div>
         <div class="card-id">lamp · :8082</div>
@@ -398,6 +483,19 @@
       <span class="thing-status offline" id="status-lamp">offline</span>
     </div>
     <div class="card-body">
+      <!-- Dedicated visual lamp illumination stage -->
+      <div class="lamp-stage" id="lamp-stage" onclick="toggleLampFromStage()" title="Cliquer pour allumer / éteindre">
+        <div class="lamp-glow-aura" id="lamp-glow-aura"></div>
+        <div class="lamp-bulb-visual" id="lamp-bulb-visual">
+          <svg viewBox="0 0 24 24" width="52" height="52" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M9 18h6" />
+            <path d="M10 22h4" />
+            <path d="M12 2a7 7 0 0 0-7 7c0 2.38 1.19 4.47 3 5.74V17a1 1 0 0 0 1 1h6a1 1 0 0 0 1-1v-2.26c1.81-1.27 3-3.36 3-5.74a7 7 0 0 0-7-7z" fill="currentColor"/>
+          </svg>
+        </div>
+        <div class="lamp-stage-hint" id="lamp-stage-hint">○ Éteinte · Cliquer pour allumer</div>
+      </div>
+
       <div class="prop-row">
         <span class="prop-label">on</span>
         <div class="toggle-wrap">
@@ -417,10 +515,19 @@
         <div class="range-row">
           <span style="font-size:.75rem;color:var(--text-dim)">0</span>
           <input type="range" id="lamp-brightness-slider" min="0" max="100" value="80"
-                 oninput="document.getElementById('lamp-brightness-label').textContent = this.value + '%'"
+                 oninput="onBrightnessInput(+this.value)"
                  onchange="setBrightness(+this.value)">
           <span style="font-size:.75rem;color:var(--text-dim)">100</span>
         </div>
+        <div class="preset-row">
+          <button class="btn btn-preset" data-val="25" onclick="setBrightness(25)">25%</button>
+          <button class="btn btn-preset" data-val="50" onclick="setBrightness(50)">50%</button>
+          <button class="btn btn-preset" data-val="75" onclick="setBrightness(75)">75%</button>
+          <button class="btn btn-preset" data-val="100" onclick="setBrightness(100)">100%</button>
+        </div>
+      </div>
+      <div style="display:flex;gap:.5rem;margin-top:.3rem">
+        <button class="btn" style="flex:1" onclick="toggleLamp()">Action: Toggle</button>
       </div>
     </div>
   </div>
@@ -552,19 +659,112 @@
     document.getElementById('card-' + id)?.classList.add('active');
   }
 
-  // ── Lamp ───────────────────────────────────────────────────────────────────
+  // ── Lamp state & visuals ────────────────────────────────────────────────────
+  const lampState = { on: false, brightness: 80 };
+  let brightnessDebounceTimer = null;
+
+  function updateLampVisuals() {
+    const stage = document.getElementById('lamp-stage');
+    const bulb = document.getElementById('lamp-bulb-visual');
+    const aura = document.getElementById('lamp-glow-aura');
+    const slider = document.getElementById('lamp-brightness-slider');
+    const label = document.getElementById('lamp-brightness-label');
+    const hint = document.getElementById('lamp-stage-hint');
+    const icon = document.getElementById('lamp-icon');
+    const card = document.getElementById('card-lamp');
+
+    const isOn = Boolean(lampState.on);
+    const b = Number(lampState.brightness) || 0;
+
+    if (label) label.textContent = b + '%';
+    if (slider) {
+      slider.value = b;
+      slider.style.background = `linear-gradient(to right, #d29922 0%, #f1b538 ${b}%, var(--border) ${b}%, var(--border) 100%)`;
+    }
+
+    document.querySelectorAll('.btn-preset').forEach(btn => {
+      btn.classList.toggle('active', parseInt(btn.dataset.val, 10) === b);
+    });
+
+    if (isOn) {
+      const alpha = Math.max(0.18, b / 100);
+      const blurGlow = Math.round(6 + (b * 0.45));
+      const blurSpread = Math.round(14 + (b * 0.65));
+      const scale = (0.7 + (b / 170)).toFixed(2);
+
+      if (bulb) {
+        bulb.style.color = b > 60 ? '#fff3c4' : (b > 25 ? '#ffd54f' : '#ffb300');
+        bulb.style.filter = `drop-shadow(0 0 ${blurGlow}px rgba(255, 202, 40, ${alpha})) drop-shadow(0 0 ${blurSpread}px rgba(255, 160, 0, ${alpha * 0.7}))`;
+      }
+      if (aura) {
+        aura.style.opacity = Math.min(1, alpha * 0.95).toFixed(2);
+        aura.style.transform = `scale(${scale})`;
+      }
+      if (icon) {
+        icon.style.background = `rgba(210,153,34, ${0.12 + (b / 300)})`;
+        icon.style.filter = `drop-shadow(0 0 ${Math.round(b * 0.12)}px rgba(255, 193, 7, ${alpha}))`;
+      }
+      if (hint) {
+        hint.innerHTML = `<span style="color:var(--amber)">● Allumée</span> à ${b}% · <span style="text-decoration:underline">Cliquer pour éteindre</span>`;
+      }
+      if (stage) {
+        stage.style.borderColor = `rgba(210, 153, 34, ${0.3 + (b / 250)})`;
+        stage.style.boxShadow = `inset 0 0 ${Math.round(15 + b * 0.45)}px rgba(255, 193, 7, ${alpha * 0.25})`;
+      }
+      if (card) {
+        card.style.borderColor = `rgba(210, 153, 34, ${0.2 + (b / 400)})`;
+      }
+    } else {
+      if (bulb) {
+        bulb.style.color = 'var(--text-muted)';
+        bulb.style.filter = 'none';
+      }
+      if (aura) {
+        aura.style.opacity = '0';
+        aura.style.transform = 'scale(0.5)';
+      }
+      if (icon) {
+        icon.style.background = 'rgba(125,133,144,.12)';
+        icon.style.filter = 'none';
+      }
+      if (hint) {
+        hint.innerHTML = `<span style="color:var(--text-dim)">○ Éteinte</span> (luminosité ${b}%) · <span style="text-decoration:underline">Cliquer pour allumer</span>`;
+      }
+      if (stage) {
+        stage.style.borderColor = 'var(--border)';
+        stage.style.boxShadow = 'none';
+      }
+      if (card) {
+        card.style.borderColor = 'var(--border)';
+      }
+    }
+  }
+
+  function onBrightnessInput(val) {
+    lampState.brightness = val;
+    updateLampVisuals();
+
+    clearTimeout(brightnessDebounceTimer);
+    brightnessDebounceTimer = setTimeout(() => {
+      setBrightness(val, true);
+    }, 100);
+  }
 
   function updateLamp({ on, brightness }) {
     if (on !== undefined) {
-      document.getElementById('lamp-on-toggle').checked = on;
+      lampState.on = on;
+      const toggle = document.getElementById('lamp-on-toggle');
+      if (toggle) toggle.checked = on;
       const label = document.getElementById('lamp-on-label');
-      label.textContent = on ? 'ON' : 'OFF';
-      label.style.color = on ? 'var(--amber)' : 'var(--text-dim)';
+      if (label) {
+        label.textContent = on ? 'ON' : 'OFF';
+        label.style.color = on ? 'var(--amber)' : 'var(--text-dim)';
+      }
     }
     if (brightness !== undefined) {
-      document.getElementById('lamp-brightness-slider').value = brightness;
-      document.getElementById('lamp-brightness-label').textContent = brightness + '%';
+      lampState.brightness = brightness;
     }
+    updateLampVisuals();
     setOnline('lamp');
     flash('card-lamp');
   }
@@ -579,9 +779,20 @@
     updateLamp({ on: value });
   }
 
-  async function setBrightness(value) {
+  async function setBrightness(value, fromInput = false) {
+    lampState.brightness = value;
+    if (!fromInput) updateLampVisuals();
     await api('POST', '/things/lamp/actions/setBrightness', { value });
     updateLamp({ brightness: value });
+  }
+
+  async function toggleLamp() {
+    await api('POST', '/things/lamp/actions/toggle');
+    loadLamp();
+  }
+
+  function toggleLampFromStage() {
+    setLampOn(!lampState.on);
   }
 
   // ── Thermostat ─────────────────────────────────────────────────────────────
