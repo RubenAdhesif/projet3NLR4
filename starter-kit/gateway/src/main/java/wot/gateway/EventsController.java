@@ -22,10 +22,12 @@ public class EventsController {
 
     private final EventHub hub;
     private final ThingsController things;
+    private final RulesEngine rules;
 
-    public EventsController(EventHub hub, ThingsController things) {
-        this.hub = hub;
+    public EventsController(EventHub hub, ThingsController things, RulesEngine rules) {
+        this.hub    = hub;
         this.things = things;
+        this.rules  = rules;
     }
 
     @GetMapping(path = "/stream", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
@@ -38,9 +40,18 @@ public class EventsController {
         if (event.thingId() == null || event.type() == null) {
             throw new ApiException(HttpStatus.BAD_REQUEST, "fields thingId and type are required");
         }
-        things.find(event.thingId()); // 404 if unknown
+        // 404 if the thing is not registered (guards against spoofed events)
+        things.find(event.thingId());
+
+        // Broadcast to all SSE clients before evaluating rules so the dashboard
+        // sees the raw event immediately, regardless of any rule execution time.
         hub.broadcast("thing", event);
-        // TODO: rules R1, R2 (R3, R4: bonus)
+
+        // Evaluate R1 and R2 (synchronous dispatch, the actual HTTP calls are
+        // made in the scheduler thread via RestartableTimer or directly).
+        rules.onEvent(event.thingId(), event.type(),
+                event.data() != null ? event.data() : Map.of());
+
         return ResponseEntity.accepted().build();
     }
 }

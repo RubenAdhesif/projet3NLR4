@@ -10,3 +10,15 @@ spring:
 gateway:
   # Authorization: Bearer <token> on /things/** and /events/**
   token: operator-secret
+
+# Direct URLs used by the rules to call Things (bypasses the proxy — see PLAN_IMPLEMENTATION.md Phase 5)
+things:
+  lamp:
+    url: http://localhost:8082
+  thermostat:
+    url: http://localhost:8081
+
+rules:
+  # T1: delay before turning the lamp off after the last motion (seconds)
+  # Use 10 for demo, 60 for production
+  t1-seconds: 10
