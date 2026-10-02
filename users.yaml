@@ -1,0 +1,139 @@
+openapi: 3.0.3
+info:
+  title: OpenAPI user management
+  description: Small API to test OpenAPI usage
+  version: 1.0.0
+  contact:
+    email: team@openapitools.org
+  license:
+    name: All rights reserved
+    url: http://apache.org/licenses/LICENSE-2.0.html
+
+servers:
+  - url: http://localhost:8080/api
+
+paths:
+  /users:
+    post:
+      tags:
+        - users
+      summary: Create a user
+      operationId: createUser
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/User'
+      responses:
+        '201':
+          description: the created user
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/User'
+        '409':
+          description: the user already exists with the same id
+
+    get:
+      tags:
+        - users
+      summary: List all users
+      operationId: listUsers
+      responses:
+        '200':
+          description: an array of users
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/User'
+
+  /users/{id}:
+    get:
+      tags:
+        - users
+      summary: Info for a specific user
+      operationId: showUserById
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: The id of the user to retrieve
+          schema:
+            type: integer
+            format: int64
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/User'
+        '404':
+          description: user not found
+
+    put:
+      tags:
+        - users
+      summary: Update a specific user
+      description: All the properties of the user are replaced, except its id (the id of the path is kept).
+      operationId: updateUser
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: The id of the user to update
+          schema:
+            type: integer
+            format: int64
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/User'
+      responses:
+        '200':
+          description: the updated user
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/User'
+        '404':
+          description: user not found
+
+    delete:
+      tags:
+        - users
+      summary: Delete a specific user
+      operationId: deleteUserById
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: The id of the user to delete
+          schema:
+            type: integer
+            format: int64
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: boolean
+        '404':
+          description: user not found
+
+components:
+  schemas:
+    User:
+      type: object
+      properties:
+        id:
+          type: integer
+          format: int64
+        name:
+          type: string
