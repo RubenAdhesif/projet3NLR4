@@ -15,8 +15,9 @@ start() {
 trap 'echo; echo "stopping..."; kill "${pids[@]}" 2>/dev/null' INT TERM EXIT
 
 start gateway/target/gateway.jar gateway
+start thing-thermostat/target/thing-thermostat.jar thermostat
 start thing-lamp/target/thing-lamp.jar lamp
-# TODO: thermostat, motion sensor
+start thing-motion/target/thing-motion.jar motion
 
 echo "dashboard: http://localhost:8080/  (token: operator-secret) - Ctrl+C to stop"
 wait
