@@ -1,2 +1,0 @@
-OpenAPI Specification v3 (reference): https://swagger.io/specification/v3/
-openapi-generator documentation: https://openapi-generator.tech/docs/installation/
