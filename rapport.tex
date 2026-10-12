@@ -1,0 +1,171 @@
+\documentclass[10pt,a4paper]{article}
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage{amsmath}
+\usepackage[french]{babel}
+\usepackage[margin=1.5cm,top=1.3cm,bottom=1.5cm]{geometry}
+\usepackage{titlesec}
+\usepackage{xcolor}
+\usepackage{hyperref}
+\usepackage{listings}
+\usepackage{enumitem}
+\usepackage{multicol}
+\usepackage{booktabs}
+\usepackage{tcolorbox}
+
+\definecolor{primary}{RGB}{31, 78, 121}
+\definecolor{secondary}{RGB}{80, 90, 105}
+\definecolor{accent}{RGB}{46, 117, 182}
+\definecolor{codebg}{RGB}{245, 247, 250}
+
+\titleformat{\section}{\color{primary}\large\bfseries}{}{0em}{}[\titlerule]
+\titleformat{\subsection}{\color{accent}\normalsize\bfseries}{}{0em}{}
+\titleformat{\subsubsection}{\color{secondary}\small\bfseries}{}{0em}{}
+\titlespacing*{\section}{0pt}{6pt}{3pt}
+\titlespacing*{\subsection}{0pt}{4pt}{2pt}
+\titlespacing*{\subsubsection}{0pt}{3pt}{1pt}
+
+\setlist{nosep, leftmargin=1.2em}
+\setlength{\parindent}{0pt}
+\setlength{\parskip}{3pt}
+
+\lstset{
+  backgroundcolor=\color{codebg},
+  basicstyle=\ttfamily\scriptsize,
+  breaklines=true,
+  frame=single,
+  rulecolor=\color{secondary!30},
+  xleftmargin=3pt,
+  xrightmargin=3pt,
+  aboveskip=3pt,
+  belowskip=3pt
+}
+
+\begin{document}
+
+\begin{center}
+  {\LARGE\bfseries\color{primary} Rapport de Projet — Smart Lab (Web of Things)}\\[3pt]
+  {\small\textbf{Master Informatique — Parcours ISA} \quad$\vert$\quad \textbf{Module :} Web/Data Services Based Integration \quad$\vert$\quad \textbf{Octobre 2026}}
+\end{center}
+\vspace{-6pt}
+
+\section*{Introduction \& Architecture du Système}
+Ce projet déploie un écosystème \textbf{Web of Things (WoT)} complet simulant un laboratoire intelligent distribué sans matériel physique, articulé autour des piliers \textbf{Access $\rightarrow$ Find $\rightarrow$ Share $\rightarrow$ Compose}. L'architecture repose sur \textbf{quatre microservices Spring Boot~3} autonomes communiquant via HTTP/REST, Webhooks et Server-Sent Events (SSE), complétés par un tableau de bord Web~:
+\begin{itemize}
+  \item \textbf{Passerelle (port 8080) :} Registre dynamique, mandataire inverse (\emph{Auth Proxy}), moteur de règles d'automatisation (R1, R2), hub SSE et serveur statique du Dashboard.
+  \item \textbf{Thermostat (\texttt{thing-thermostat}, port 8081) :} Simulation thermique continue ($+0.2^\circ\text{C/s}$ en chauffe, $-0.05^\circ\text{C/s}$ à l'arrêt), consigne \texttt{target}, modes \texttt{off/heat/eco}, émission de l'événement \texttt{targetReached}.
+  \item \textbf{Lampe (\texttt{thing-lamp}, port 8082) :} Éclairage connecté, propriété booléenne \texttt{on}, gradateur \texttt{brightness} (0--100), actions \texttt{toggle} et \texttt{setBrightness}.
+  \item \textbf{Capteur de Mouvement (\texttt{thing-motion}, port 8083) :} Horodatage de détection \texttt{lastMotion}, action \texttt{simulateMotion} et événement \texttt{motion}.
+\end{itemize}
+Le démarrage est unifié via \texttt{./run.sh} et l'ensemble des 38 tests d'intégration (\texttt{check-routes.sh}) est validé avec succès (100\% conformité).
+
+\section{Access (Accès aux Ressources)}
+Le niveau \textbf{Access} standardise l'exposition et la manipulation des objets physiques sous forme de ressources Web RESTful légères (HTTP/JSON).
+
+\subsection{Modélisation des Affordances et Format des Échanges}
+Chaque objet structure ses interactions selon les trois affordances du Web of Things~:
+\begin{itemize}
+  \item \textbf{Propriétés (\texttt{/properties}, \texttt{/properties/\{name\}})} : La lecture retourne obligatoirement \texttt{\{"name": "...", "value": ...\}}. L'écriture via \texttt{PUT} requiert \texttt{\{"value": ...\}}. Les propriétés en lecture seule (\texttt{temperature}, \texttt{lastMotion}) rejettent toute écriture par une erreur \texttt{400 Bad Request}.
+  \item \textbf{Actions (\texttt{/actions/\{name\}})} : Invoquées par \texttt{POST}. Elles acceptent un corps vide pour les actions sans paramètre (\texttt{toggle}, \texttt{simulateMotion}) ou un payload \texttt{\{"value": ...\}} (\texttt{setBrightness}, \texttt{setTarget}).
+  \item \textbf{Événements} : Flux asynchrones émis par les objets lors de transitions d'état (\texttt{motion}, \texttt{targetReached}, \texttt{propertyChanged}).
+\end{itemize}
+
+\subsection{Pattern \emph{Auth Proxy}}
+Pour garantir le cloisonnement réseau et la sécurité, le Dashboard et les clients externes n'interrogent \textbf{jamais} les objets directement. Toutes les requêtes sont mandatées par la passerelle via les routes \texttt{/things/\{id\}/properties/**} et \texttt{/things/\{id\}/actions/**}. Le composant \texttt{ThingClient} relaye les requêtes à l'objet cible via \texttt{RestClient} (Spring Boot~3) avec des délais de garde stricts (2s connexion, 3s lecture). Si un objet est indisponible ou crashé, la passerelle intercepte l'erreur et retourne un statut normalisé \textbf{\texttt{502 Bad Gateway}}.
+
+\subsection{Codes Statuts HTTP et Format Uniforme des Erreurs}
+L'architecture implémente scrupuleusement la matrice des statuts de l'énoncé via un \texttt{@RestControllerAdvice} centralisé~:
+\begin{itemize}
+  \item \textbf{200 OK} : Lecture, écriture de propriété ou exécution d'action réussie.
+  \item \textbf{201 Created} : Enregistrement d'un objet (avec en-tête obligatoire \texttt{Location: /things/\{id\}}).
+  \item \textbf{202 Accepted} : Réception valide d'un webhook d'événement (\texttt{POST /events}).
+  \item \textbf{204 No Content} : Désenregistrement propre d'un objet (\texttt{DELETE /things/\{id\}}).
+  \item \textbf{400 Bad Request} : Champ manquant, valeur invalide/hors bornes (ex.~luminosité à 150) ou écriture sur propriété en lecture seule.
+  \item \textbf{401 Unauthorized} : Jeton Bearer absent ou invalide sur l'API de la passerelle.
+  \item \textbf{403 Forbidden} : Tentative d'écriture avec un jeton en lecture seule (\emph{rôle viewer}, bonus).
+  \item \textbf{404 Not Found} : Objet, propriété ou action inconnu.
+  \item \textbf{409 Conflict} : Enregistrement d'un équipement dont l'identifiant existe déjà.
+  \item \textbf{502 Bad Gateway} : Équipement cible injoignable ou en timeout.
+\end{itemize}
+Toutes les erreurs renvoient systématiquement un payload explicite : \texttt{\{"status": <code\_http>, "error": "<message explicite>"\}}.
+
+\section{Find (Découverte \& Répertoire des Objets)}
+Le niveau \textbf{Find} permet la localisation dynamique et l'auto-description des objets connectés sans configuration préalable côté passerelle.
+
+\subsection{Auto-enregistrement Dynamique \& Cycle de Vie}
+Au démarrage, chaque microservice d'objet invoque \texttt{POST /things} sur la passerelle avec son jeton et un corps décrivant son profil : \texttt{\{"id": "...", "name": "...", "baseUrl": "...", "model": \{...\}\}}.
+La passerelle stocke l'équipement dans une \texttt{ConcurrentHashMap<String, Thing>} thread-safe, renvoie \texttt{201 Created} avec l'en-tête \texttt{Location: /things/\{id\}}, et pousse un événement SSE de type \texttt{registry} synchronisant instantanément les navigateurs connectés. Si l'identifiant est déjà enregistré, la passerelle refuse l'inscription par un code \texttt{409 Conflict}.
+À l'arrêt du service, un hook \texttt{@PreDestroy} libère proprement la ressource via \texttt{DELETE /things/\{id\}} (\texttt{204 No Content}).
+
+\subsection{Auto-description : Web Thing Model}
+Chaque objet expose sa description sémantique sur \texttt{GET /model} selon le standard \emph{Web Thing Model} du cours :
+\begin{itemize}
+  \item Métadonnées : nom, description textuelle, version logicielle.
+  \item Typage des propriétés : types primitifs (\texttt{boolean}, \texttt{number}, \texttt{string}), bornes de validité (\texttt{minimum}, \texttt{maximum}), mutabilité (\texttt{readOnly}).
+  \item Schéma des actions : paramètres attendus et types d'entrée.
+  \item Liens hypermédias : collection de liens relatifs vers les ressources (\texttt{"links": \{"properties": "/properties", "toggle": "/actions/toggle", ...\}}).
+\end{itemize}
+La consultation du catalogue s'effectue par \texttt{GET /things} (liste avec liens d'accès) et \texttt{GET /things/\{id\}} (fiche détaillée).
+
+\section{Share (Partage Sécurisé \& Contrôle d'Accès)}
+Le niveau \textbf{Share} assure l'isolation et la protection des interfaces de programmation de la passerelle.
+
+\subsection{Authentification par Jeton Bearer}
+Toutes les requêtes vers la passerelle (\texttt{/things/**} et \texttt{/events/**}) doivent fournir l'en-tête HTTP :
+\texttt{Authorization: Bearer <token>}. Ce contrôle est intercepté par \texttt{TokenFilter} (\texttt{OncePerRequestFilter}). En cas d'omission ou de jeton invalide, l'accès est rejeté par un statut \textbf{\texttt{401 Unauthorized}} accompagné de l'en-tête \texttt{WWW-Authenticate: Bearer} et du corps JSON explicite. Les ressources statiques du Dashboard (\texttt{/}, \texttt{index.html}, CSS, JS) restent publiques pour permettre l'affichage de l'interface et la saisie utilisateur.
+
+\subsection{Contrôle d'Accès par Rôles : Opérateur vs Observateur (Bonus RBAC)}
+Un système de rôles a été implémenté pour enrichir la sécurité :
+\begin{itemize}
+  \item \textbf{Rôle \texttt{operator} (\texttt{operator-secret})} : Droits complets en lecture, écriture et déclenchement d'actions.
+  \item \textbf{Rôle \texttt{viewer} (\texttt{viewer-secret})} : Droits restreints en lecture seule. Les requêtes de lecture (\texttt{GET}) sont autorisées, mais toute tentative d'altération (\texttt{PUT}, \texttt{POST}, \texttt{DELETE}) est interceptée et rejetée par un statut \textbf{\texttt{403 Forbidden}} (\texttt{\{"status":403, "error":"forbidden: read-only access"\}}).
+\end{itemize}
+
+\subsection{Streaming SSE Sécurisé}
+L'API navigateur \texttt{EventSource} ne supportant pas l'injection d'en-têtes HTTP personnalisés, une dérogation sécurisée permet la transmission du jeton via paramètre de requête pour le flux temps réel : \texttt{GET /events/stream?token=operator-secret}. Le filtre extrait et valide ce paramètre avec le même niveau d'exigence avant d'ouvrir la connexion persistante.
+
+\subsection{Contrat d'Interface OpenAPI 3.1}
+La totalité de l'API de la passerelle (endpoints, schémas JSON, codes HTTP et sécurité \texttt{bearerAuth}) est contractuellement spécifiée dans le fichier \texttt{gateway.yaml}, consultable et téléchargeable depuis le Dashboard.
+
+\section{Compose (Composition de Services \& Automatisation)}
+Le niveau \textbf{Compose} orchestre les équipements autonomes au sein d'interactions automatisées transverses.
+
+\subsection{Architecture Événementielle : Webhooks \& SSE vs WebSockets}
+Lorsqu'un changement d'état survient sur un objet (présence détectée, consigne de température atteinte), celui-ci poste un événement par Webhook vers la passerelle (\texttt{POST /events}). Pour prévenir tout blocage de boucle d'événements, l'émission est déportée dans un thread asynchrone (\texttt{CompletableFuture.runAsync}).
+À la réception, \texttt{EventHub} relaie l'événement en temps réel aux clients connectés via \texttt{GET /events/stream} (\texttt{SseEmitter}), en maintenant un \emph{heartbeat ping} toutes les 15 secondes.
+\textbf{Justification du choix SSE vs WebSockets :} Le flux temps réel vers le client étant strictement unidirectionnel (diffusion serveur vers navigateur, les interactions ascendantes s'effectuant via REST), les Server-Sent Events s'imposent naturellement. SSE fonctionne sur HTTP standard sans surcoût de négociation full-duplex TCP, traverse nativement les pare-feux et gère automatiquement les reconnexions côté navigateur (\texttt{EventSource}).
+
+\subsection{Moteur de Règles d'Automatisation (\texttt{RulesEngine})}
+La passerelle intègre un moteur événementiel implémentant les règles du scénario de référence :
+\begin{itemize}
+  \item \textbf{Règle R1 (Éclairage intelligent réarmable) :}
+  Sur réception de l'événement \texttt{motion}, la passerelle allume la lampe par écriture directe de la propriété : \texttt{PUT http://localhost:8082/properties/on} (\texttt{\{"value": true\}}). Conformément aux exigences du sujet, l'action \texttt{toggle} n'est \textbf{jamais} utilisée afin d'éviter d'éteindre une lampe déjà allumée.
+  Un minuteur réarmable (\texttt{RestartableTimer} s'appuyant sur \texttt{TaskScheduler}) est initialisé pour un délai $T_1$ (10s en démo). Tout nouveau mouvement annule la planification antérieure et relance le décompte. À expiration sans mouvement, la lampe est éteinte (\texttt{PUT /properties/on} à \texttt{false}).
+  \item \textbf{Règle R2 (Confort thermique multi-conditions) :}
+  Sur réception de \texttt{motion}, la passerelle interroge la température actuelle du thermostat. Si $\text{température} < 19.0^\circ\text{C}$, elle enclenche la chauffe en basculant le mode à \texttt{heat} et la consigne à $19.0^\circ\text{C}$ (\texttt{target = 19.0}).
+  Lorsque le thermostat atteint $19.0^\circ\text{C}$, il émet l'événement \texttt{targetReached}. Si le thermostat est en mode \texttt{heat}, la passerelle coupe immédiatement le chauffage en basculant le mode à \texttt{off}. En mode \texttt{eco}, cet événement est ignoré.
+  \item \textbf{Ordre d'application \& Isolation :} Sur détection de mouvement, l'ordre d'évaluation strict est : fin de R3 (si mode éco actif), puis R1, puis R2.
+  Les règles appellent les objets \textbf{directement sur leurs ports dédiés} sans transiter par le proxy de la passerelle, garantissant que ces écritures automatiques ne soient pas interprétées comme des commandes manuelles (condition requise pour la règle de débrayage R4).
+\end{itemize}
+
+\subsection{Moteur de Simulation Thermique}
+Le thermostat embarque une tâche planifiée cadencée à 1~Hz (\texttt{@Scheduled(fixedRate = 1000)}) :
+\begin{itemize}
+  \item En modes \texttt{heat} et \texttt{eco}, la température s'élève de $+0.2^\circ\text{C/s}$ vers la consigne. À la première atteinte de consigne par le bas, l'événement \texttt{targetReached} est émis une seule fois (protégé par un drapeau atomique), puis la température est maintenue stable.
+  \item En mode \texttt{off}, la température dérive lentement vers la température extérieure ($15.0^\circ\text{C}$) à raison de $-0.05^\circ\text{C/s}$, sans émission d'événement.
+  \item La température initiale est fixée à $17.5^\circ\text{C}$ au démarrage pour permettre la démonstration immédiate de la règle R2.
+\end{itemize}
+
+\section{Limits and possible improvements (Limites \& Améliorations)}
+Bien que le système valide 100\% des tests fonctionnels et d'intégration, plusieurs axes d'évolution architecturale peuvent être dégagés pour un contexte industriel :
+\begin{itemize}
+  \item \textbf{Persistance de l'état (actuellement volatile en mémoire) :} Le répertoire des objets et les données d'état reposent sur des maps mémoires. L'intégration d'une base légère ou d'un cache distribué permettrait la résilience en cas de redémarrage.
+  \item \textbf{Sonde de disponibilité proactive (\emph{Liveness Checking}, bonus) :} La passerelle ne détecte actuellement la coupure d'un objet qu'à la sollicitation (502 Bad Gateway). Une tâche périodique interrogeant \texttt{GET /model} toutes les 10s permettrait d'actualiser dynamiquement un champ \texttt{"status": "online"|"offline"} dans \texttt{GET /things}.
+  \item \textbf{Implémentation des règles R3 et R4 (bonus) :}
+  \emph{R3 (Économie d'énergie) :} Déclenchement d'un timer $T_3$ après inactivité prolongée basculant le thermostat en mode \texttt{eco} ($17^\circ\text{C}$).
+  \emph{R4 (Priorité utilisateur / Débrayage manuel) :} Détection des écritures proxy initiées par le dashboard pour suspendre l'automatisation durant $T_4$ ou jusqu'à reprise explicite (\texttt{POST /things/\{id\}/automation/resume}).
+  \item \textbf{Format sémantique W3C Thing Description (TD 1.1) :} Faire évoluer le format descriptif JSON du modèle vers du JSON-LD conforme au W3C WoT Thing Description avec vocabulaire SAREF.
+  \item \textbf{Sécurisation mutuelle passerelle-objets (\emph{Thing Gateway Key}) :} Restreindre les microservices des objets pour qu'ils n'acceptent de requêtes qu'en provenance de la passerelle (clé secrète d'interconnexion ou mTLS).
+\end{itemize}
+
+\end{document}
